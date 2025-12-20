@@ -14,7 +14,10 @@ This project implements and benchmarks a highly optimized sparse matrix-vector m
 - **Restrict Qualifiers:**
   - The standalone spMV function uses `__restrict` pointers to enable better compiler optimizations and full-width AVX2 loads.
 - **Software Prefetching:**
-  - `__builtin_prefetch` is used to prefetch future vector values, reducing cache misses and improving memory access efficiency.
+  - `__builtin_prefetch` is used to prefetch upcoming `x[col]` accesses in the inner loop (GCC/Clang only), reducing cache miss latency on some workloads.
+  - Prefetching is compile-time configurable:
+    - `SPMV_ENABLE_PREFETCH` (default: `1`) to enable/disable all prefetching.
+    - `SPMV_PREFETCH_DISTANCE` (default: `16`) to set how far ahead (in inner-loop iterations) to prefetch.
 
 ## Benchmark Results
 ### Hardware
@@ -57,6 +60,32 @@ Use the provided `makefile` or run:
     -L/usr/local/opt/llvm/lib -lomp \
     -o spmv
 ./spmv
+
+# Example (prefetch ON): tune software prefetching
+/usr/local/opt/llvm/bin/clang++ \
+  -O3 -march=native -ffast-math -funroll-loops \
+  -DSPMV_PREFETCH_DISTANCE=32 \
+  -fopenmp main.cpp sparse_matrix.cpp \
+  -L/usr/local/opt/llvm/lib -lomp \
+  -o spmv
+
+# Example (prefetch OFF): disable software prefetching
+/usr/local/opt/llvm/bin/clang++ \
+  -O3 -march=native -ffast-math -funroll-loops \
+  -DSPMV_ENABLE_PREFETCH=0 \
+  -fopenmp main.cpp sparse_matrix.cpp \
+  -L/usr/local/opt/llvm/lib -lomp \
+  -o spmv
+
+# Linux (g++): prefetch ON (defaults: enable=1, distance=16)
+g++ -O3 -march=native -ffast-math -funroll-loops -fopenmp \
+  -DSPMV_PREFETCH_DISTANCE=16 \
+  main.cpp sparse_matrix.cpp -o spmv
+
+# Linux (g++): prefetch OFF
+g++ -O3 -march=native -ffast-math -funroll-loops -fopenmp \
+  -DSPMV_ENABLE_PREFETCH=0 \
+  main.cpp sparse_matrix.cpp -o spmv
 ```
 
 ## Summary
