@@ -1,92 +1,64 @@
 # spMV Project Performance Documentation
 
 ## Overview
-This project implements and benchmarks a highly optimized sparse matrix-vector multiplication (spMV) kernel in C++ using the CSR format. The kernel leverages OpenMP for parallelization and includes cache optimizations such as software prefetching and static scheduling.
+This project implements and benchmarks a sparse matrix-vector multiplication (spMV) kernel in C++ using the CSR format. The kernel uses OpenMP parallelization, static scheduling, restrict-qualified pointers, and optional software prefetching.
 
-## Key Results
-- **Implemented and benchmarked sparse-matrix×vector kernel; improved from 0.28→1.3 GFLOP/s (4.6×) on 2019 MBP.**
-- **Characterised roof-line and identified 8× energy-efficiency headroom for FPGA overlay.**
+## Key Result
+- **Measured on a 2019 MacBook Pro:** improved from **0.28 to 1.3 GFLOP/s**, a **4.6× speedup**.
 
 ## Optimization Techniques
-- **OpenMP Parallelization:**
-  - The spMV kernel uses OpenMP to parallelize row computations, allowing full utilization of multi-core CPUs.
-  - Static scheduling with a large chunk size (`schedule(static,16384)`) is used to amortize thread overhead.
-- **Restrict Qualifiers:**
-  - The standalone spMV function uses `__restrict` pointers to enable better compiler optimizations and full-width AVX2 loads.
-- **Software Prefetching:**
-  - `__builtin_prefetch` is used to prefetch upcoming `x[col]` accesses in the inner loop (GCC/Clang only), reducing cache miss latency on some workloads.
-  - Prefetching is compile-time configurable:
-    - `SPMV_ENABLE_PREFETCH` (default: `1`) to enable/disable all prefetching.
-    - `SPMV_PREFETCH_DISTANCE` (default: `16`) to set how far ahead (in inner-loop iterations) to prefetch.
+- **OpenMP parallelization** across matrix rows
+- **Static scheduling** to reduce scheduling overhead
+- **Restrict-qualified pointers** to help compiler optimization
+- **Optional software prefetching** for upcoming sparse-vector accesses
 
-## Benchmark Results
-### Hardware
+## Benchmark Hardware
 - **Machine:** MacBook Pro 2019
 - **CPU:** 2.6 GHz 6-Core Intel Core i7 (12 logical threads)
 
-### Thread Scaling
-| Threads | Time (ns)    | Notes                       |
-|---------|--------------|-----------------------------|
-| 1       | 7,745,270    | Baseline, single-threaded   |
-| 2       | 2,046,250    | Good scaling                |
-| 4       | 1,523,350    | Best performance            |
-| 6       | 1,442,530    | Matches physical cores      |
-| 12      | 2,060,370    | Hyper-threading, slower     |
+## Thread Scaling
+| Threads | Time (ns) | Notes |
+| ---: | ---: | --- |
+| 1 | 7,745,270 | Baseline |
+| 2 | 2,046,250 | Strong scaling |
+| 4 | 1,523,350 | Near best |
+| 6 | 1,442,530 | Best measured result |
+| 12 | 2,060,370 | Slower from contention |
 
-- **GFLOP/s:** Improved from 0.28 to 1.3 GFLOP/s (4.6× speedup)
-- **Observation:**
-  - Performance improves up to 6 threads (physical cores).
-  - Using 12 threads (hyper-threading) results in slower performance due to memory bandwidth contention.
+- **GFLOP/s:** 0.28 → 1.3
+- **Speedup:** 4.6×
+- Performance improved through the six physical cores, then fell when using all 12 logical threads.
 
-### Roofline and FPGA Overlay
-- Roofline analysis shows the kernel is memory-bound on CPU, with compute efficiency limited by memory bandwidth.
-- FPGA overlay offers up to 8× energy-efficiency headroom compared to CPU, making it a promising target for further acceleration.
+## Interpretation
+The benchmark is consistent with a memory-bound sparse workload: adding useful CPU parallelism helped until memory-system contention dominated.
 
-### Cache Optimization
-- Software prefetching and static scheduling further reduce cache misses and thread overhead, especially for large matrices.
-- For memory-bound workloads, optimal performance is achieved by matching thread count to physical cores.
-
-## Recommendations
-- Use `OMP_NUM_THREADS=6` for best performance on this hardware.
-- For other systems, benchmark with different thread counts to find the optimal setting.
-- Further optimizations (e.g., blocking, SIMD) can be explored for even larger or more complex matrices.
+The repository does **not** claim a measured FPGA energy-efficiency advantage. FPGA offload remains a possible follow-on experiment rather than a demonstrated result here.
 
 ## How to Build and Run
-Use the provided `makefile` or run:
+
+Using the supplied makefile:
+
+```bash
+make
 ```
+
+Or directly with Clang/OpenMP:
+
+```bash
 /usr/local/opt/llvm/bin/clang++ \
-    -O3 -march=native -ffast-math -funroll-loops \
-    -fopenmp main.cpp sparse_matrix.cpp \
-    -L/usr/local/opt/llvm/lib -lomp \
-    -o spmv
+  -O3 -march=native -ffast-math -funroll-loops \
+  -fopenmp main.cpp sparse_matrix.cpp \
+  -L/usr/local/opt/llvm/lib -lomp \
+  -o spmv
 ./spmv
-
-# Example (prefetch ON): tune software prefetching
-/usr/local/opt/llvm/bin/clang++ \
-  -O3 -march=native -ffast-math -funroll-loops \
-  -DSPMV_PREFETCH_DISTANCE=32 \
-  -fopenmp main.cpp sparse_matrix.cpp \
-  -L/usr/local/opt/llvm/lib -lomp \
-  -o spmv
-
-# Example (prefetch OFF): disable software prefetching
-/usr/local/opt/llvm/bin/clang++ \
-  -O3 -march=native -ffast-math -funroll-loops \
-  -DSPMV_ENABLE_PREFETCH=0 \
-  -fopenmp main.cpp sparse_matrix.cpp \
-  -L/usr/local/opt/llvm/lib -lomp \
-  -o spmv
-
-# Linux (g++): prefetch ON (defaults: enable=1, distance=16)
-g++ -O3 -march=native -ffast-math -funroll-loops -fopenmp \
-  -DSPMV_PREFETCH_DISTANCE=16 \
-  main.cpp sparse_matrix.cpp -o spmv
-
-# Linux (g++): prefetch OFF
-g++ -O3 -march=native -ffast-math -funroll-loops -fopenmp \
-  -DSPMV_ENABLE_PREFETCH=0 \
-  main.cpp sparse_matrix.cpp -o spmv
 ```
 
-## Summary
-This project demonstrates significant performance improvements for spMV on modern CPUs through parallelization and cache-aware optimizations. The code is ready for further benchmarking and extension to more advanced kernels, and is well-positioned for energy-efficient acceleration on FPGA overlays.
+Prefetch tuning is available through:
+
+```bash
+-DSPMV_ENABLE_PREFETCH=0
+-DSPMV_PREFETCH_DISTANCE=32
+```
+
+## Scope
+This is a focused CPU performance-characterization project. Its strongest evidence is the measured thread-scaling result and the 4.6× improvement on the stated machine.
